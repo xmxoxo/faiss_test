@@ -1,0 +1,566 @@
+# VecSearch 小规模向量相似度搜索框架
+
+项目名称：小规模向量相似度搜索框架
+目标：1万条数据，100毫秒返回
+框架思路：
+	* 把向量保存到memcache里，方便快速存取；
+	* 使用map-reduce,做多线程加快速度；
+	* flask搭建API服务；
+	* 提供向量的操作：保存，查询，删除；
+	* 提供匹配操作：输入向量Q，快速返回结果；
+
+python操作memcache - Hu知非 - 博客园  https://www.cnblogs.com/hujq1029/p/7652619.html
+
+python memcache操作-安装、连接memcache - 考鸡蛋 - 博客园  https://www.cnblogs.com/lijunjiang2015/p/7995131.html
+
+Python标准库系列之Memcache模块 - 简书  https://www.jianshu.com/p/34dc252b5950
+
+Memcache 查看列出所有key方法 – 运维生存时间  http://www.ttlsa.com/memcache/memcache-list-all-keys/
+
+试验结果一：
+
+```
+20:27:26.69|O:>VecSearch_CPU.py
+随机生成10000个向量，维度：768
+创建搜索器...
+添加用时:00:00:00
+Used Memory: 93.24609375 MB
+-----------------批量查询测试-----------------
+批量查询次数：100...
+32.75099992752075 0.3275099992752075
+查询次数:100, 平均用时:0.3275099992752075
+----------------------------------------
+输入任意值开始测试(Q退出)：
+随机生成一个查询向量...
+query:[4.50261254e-01 4.48696348e-01 1.92929563e-01 1.22597171e-01
+ 9.96512975e-01 7.40447232e-02 6.96161102e-01 2.88173436e-04
+ 1.87310425e-01 9.51545730e-01]...
+查询结果:
+索引号:6811,相似度:0.776450
+分析用时:0.30900001525878906
+----------------------------------------
+输入任意值开始测试(Q退出)：q
+```
+
+改用NP.dot算法来计算余弦相似度，速度有所提高：
+
+```
+root@ubuntu:/mnt/sda1/transdat/VecSearch# python VecSearch_CPU.py
+==============大批量向量余弦相似度计算==============
+随机生成10000个向量，维度：768
+正在创建搜索器...
+添加用时:0.002709秒
+Used Memory: 118.09765625 MB
+-----------------批量查询测试-----------------
+批量测试次数：100 次，请稍候...
+总用时:8 秒, 平均用时:83.950245 毫秒
+----------------------------------------
+回车开始测试(Q退出)：
+随机生成一个查询向量...
+query:[4.50261254e-01 4.48696348e-01 1.92929563e-01 1.22597171e-01
+ 9.96512975e-01 7.40447232e-02 6.96161102e-01 2.88173436e-04
+ 1.87310425e-01 9.51545730e-01]...
+查询结果:
+索引号:6811,相似度:0.776450
+总用时:0 秒, 平均用时:106.901646 毫秒
+----------------------------------------
+回车开始测试(Q退出)：q
+
+```
+
+-----------------------------------------
+## 安装faiss
+
+```
+# 更新conda
+conda update conda
+# 先安装mkl
+conda install mkl
+
+# faiss提供gpu和cpu版，根据服务选择
+# cpu版本
+conda install faiss-cpu -c pytorch
+
+# gpu版本 -- 记得根据自己安装的cuda版本安装对应的faiss版本，不然会出异常
+
+# For CUDA8
+conda install faiss-gpu cudatoolkit=8.0 -c pytorch 
+
+# For CUDA9
+conda install faiss-gpu cudatoolkit=9.0 -c pytorch 
+
+# For CUDA10
+conda install faiss-gpu cudatoolkit=10.0 -c pytorch 
+
+
+# 校验是否安装成功
+python -c "import faiss"
+————————————————
+原文链接：https://blog.csdn.net/kanbuqinghuanyizhang/article/details/80774609
+```
+
+-----------------------------------------
+## 试验结果对比
+
+对比暴力版本和faiss-cpu版本
+
+暴力版本运行结果：
+
+```
+root@ubuntu:/mnt/sda1/transdat/VecSearch# python VecSearch_Lib.py
+===========大批量向量余弦相似度计算-[暴力版]===========
+随机生成100000个向量，维度：768
+正在创建搜索器...
+添加用时:0.027474秒
+Used Memory: 672.36328125 MB
+-----------------单条查询测试-----------------
+搜索结果: [0.78086126 0.77952558 0.77949381 0.77775592 0.77547914] [ 541  443 1472  370  209]
+显示查询结果，并验证余弦相似度...
+索引号:  541, 距离:0.780861
+索引号:  443, 距离:0.779526
+索引号: 1472, 距离:0.779494
+索引号:  370, 距离:0.777756
+索引号:  209, 距离:0.775479
+-----------------批量查询测试-----------------
+批量测试次数：100 次，请稍候...
+总用时:93 秒, 平均用时:932.549202 毫秒
+
+```
+
+
+faiss-cpu版本的运行结果：
+
+```
+root@ubuntu:/mnt/sda1/transdat/VecSearch# python VecSearch_faiss.py
+=========大批量向量余弦相似度计算-[faiss版]==========
+随机生成100000个向量，维度：768
+正在创建搜索器...
+(0, 99999)
+创建用时:2.116421秒
+Used Memory: 1326.91015625 MB
+-----------------单条查询测试-----------------
+显示查询结果，并验证余弦相似度...
+索引号: 1058, 距离:114.878273, 余弦相似度:0.771127
+索引号:  541, 距离:115.051292, 余弦相似度:0.780861
+索引号:  370, 距离:115.715881, 余弦相似度:0.777756
+索引号:  209, 距离:115.731331, 余弦相似度:0.775479
+索引号: 1472, 距离:115.832954, 余弦相似度:0.779494
+总用时:9毫秒
+-----------------批量查询测试-----------------
+正在批量测试1000次，每次返回Top 5，请稍候...
+总用时:1415毫秒, 平均用时:1.415620毫秒
+
+```
+
+
+## 数据持久化
+
+** 内存占用情况估算 **
+10万条768维向量(float32), 内存占用约为：
+100,000*768*32/8 = 307,200,000 Bytes
+总大小约为300M
+
+如果是1000万768维度向量(float32)，内存占用约为：
+300M* 100 = 30,000 M = 30G
+
+** 文件大小估算 ** 
+向量数据持久化使用np.save()或者x.tofile()保存到文件
+测试数据如下：
+10万条768维度向量，保存到文件大小为：292 MB (307,200,128 字节)
+npy格式与bin格式基本上没有很大的差别，npy文件就是多一个文件头部；
+可以看出这个格式已经与内存大小基本一致，没有多余的内容了。
+
+1000万条768维度向量，保存到文件大小约为：292*100=29,200M = 29G 
+
+[2020/8/19] 降维计算
+
+如果把向量的维度从768降到200，那么内存或者文件的大小将从30G降到：8G 
+如果把向量的维度从768降到100，那么内存或者文件的大小将从30G降到：4G 
+但是降维的同时需要测试模型的准确度下降了多少。
+
+-----------------------------------------
+
+## 关于语义模型的构思及向量输出
+2020/6/15
+
+语义相似度模型采用BERT句子对相似度模型
+
+训练数据格式为：标签，句子A，句子B
+
+标签1表示语义相同，0表示语义不同；
+
+训练好的数据输出向量：使用bert-as-serving
+输出得到语义向量，维度：768
+
+基于LCQMC+ALBERT 的语义相似度模型： 
+训练结果目录： F:\project\Albert_zh\lcqmc_output
+
+训练好的语义模型存放目录： F:\project\Albert_zh\sim_model
+
+启动向量服务：
+```
+bert-serving-start -model_dir F:\project\Albert_zh\sim_model -http_port 9210 -cpu
+
+bert-serving-start  \
+	-model_dir F:\project\Albert_zh\sim_model  \
+	-num_worker=2
+
+```
+
+输出向量，参考： https://github.com/llq20133100095/bert_use/blob/master/get_embedding.py
+
+
+可以尝试以下不同的方式：
+试验一： 将Query和问句直接作为句子输入模型；
+试验二： 将Queryt和问句分别作为句子A和句子B输入模型，另一句留空输入模型；
+试验三： 修改模型的Loss函数，可尝试使用 hinge loss
+
+
+Charlie  16:25:15
+https://github.com/BeHappyForMe/forum_know/blob/master/faq/bert_synonymous.py
+你看看这个 就是cos+hinge loss
+很简单的point wise方式
+
+
+单样本学习（One shot learning）和孪生网络（Siamese Network）简介 - 知乎 
+https://zhuanlan.zhihu.com/p/29058453
+
+
+模型文件：
+O:\中开\工作日志\需求专家匹配\code\brother_keras.py
+
+-----------------------------------------
+
+F:\project\sentence-similarity\code\sentence-similarity
+
+可西哥  16:56:29
+有几个点需要解决
+一个是使用同一个模型来进行编码,也就是共享一个网络层；
+另一个就是训练完模型后，在使用模型的时候，预测结果不要最终的，要怎么取到倒数第二层的向量
+
+提取中间层：
+“让Keras更酷一些！”：层与模型的重用技巧 - 科学空间|Scientific Spaces  https://spaces.ac.cn/archives/6985
+
+keras输出中间层结果 - 简书  https://www.jianshu.com/p/26269298f855
+
+-----------------------------------------
+## 向量搜索框架 2020/9/7
+
+框架组成部分：
+
+1. 向量生成模型。
+
+模型可以是简单的hash计算，也可以是机器学习模型如gensim等，
+或者是深度学习的LSTM或者simBERT等大模型；
+
+2. 向量搜索服务
+	简单的可以直接用暴力计算或者自定义的向量索引，或者gensim自带的向量对比；
+	数据量大的可以使用faiss向量搜索服务等；
+
+3. 向量查询服务
+	用户侧API, 用户输入一个文本后，返回查询的结果；
+
+
+* 使用docker打包，便于安装使用；
+
+* 提供使用文档，包括文档索引生成、更新、查询等使用；
+
+-----------------------------------------
+## 安装faiss-GPU
+
+使用conda进行安装，安装步骤及结果：
+
+```
+root@ubuntu:~# conda install faiss-gpu cudatoolkit=10.0 -c pytorch # For CUDA10
+Collecting package metadata (current_repodata.json): failed
+
+# >>>>>>>>>>>>>>>>>>>>>> ERROR REPORT <<<<<<<<<<<<<<<<<<<<<<
+
+    Traceback (most recent call last):
+      File "/home/hexi/miniconda3/lib/python3.7/site-packages/conda/exceptions.py", line 1079, in __call__
+        return func(*args, **kwargs)
+      File "/home/hexi/miniconda3/lib/python3.7/site-packages/conda/cli/main.py", line 84, in _main
+        exit_code = do_call(args, p)
+      File "/home/hexi/miniconda3/lib/python3.7/site-packages/conda/cli/conda_argparse.py", line 82, in do_call
+        return getattr(module, func_name)(args, parser)
+      File "/home/hexi/miniconda3/lib/python3.7/site-packages/conda/cli/main_install.py", line 20, in execute
+        install(args, parser, 'install')
+      File "/home/hexi/miniconda3/lib/python3.7/site-packages/conda/cli/install.py", line 265, in install
+        should_retry_solve=(_should_retry_unfrozen or repodata_fn != repodata_fns[-1]),
+      File "/home/hexi/miniconda3/lib/python3.7/site-packages/conda/core/solve.py", line 117, in solve_for_transaction
+        should_retry_solve)
+      File "/home/hexi/miniconda3/lib/python3.7/site-packages/conda/core/solve.py", line 158, in solve_for_diff
+        force_remove, should_retry_solve)
+      File "/home/hexi/miniconda3/lib/python3.7/site-packages/conda/core/solve.py", line 262, in solve_final_state
+        ssc = self._collect_all_metadata(ssc)
+      File "/home/hexi/miniconda3/lib/python3.7/site-packages/conda/common/io.py", line 88, in decorated
+        return f(*args, **kwds)
+      File "/home/hexi/miniconda3/lib/python3.7/site-packages/conda/core/solve.py", line 415, in _collect_all_metadata
+        index, r = self._prepare(prepared_specs)
+      File "/home/hexi/miniconda3/lib/python3.7/site-packages/conda/core/solve.py", line 1011, in _prepare
+        self.subdirs, prepared_specs, self._repodata_fn)
+      File "/home/hexi/miniconda3/lib/python3.7/site-packages/conda/core/index.py", line 228, in get_reduced_index
+        repodata_fn=repodata_fn)
+      File "/home/hexi/miniconda3/lib/python3.7/site-packages/conda/core/subdir_data.py", line 105, in query_all
+        result = tuple(concat(executor.map(subdir_query, channel_urls)))
+      File "/home/hexi/miniconda3/lib/python3.7/concurrent/futures/_base.py", line 586, in result_iterator
+        yield fs.pop().result()
+      File "/home/hexi/miniconda3/lib/python3.7/concurrent/futures/_base.py", line 432, in result
+        return self.__get_result()
+      File "/home/hexi/miniconda3/lib/python3.7/concurrent/futures/_base.py", line 384, in __get_result
+        raise self._exception
+      File "/home/hexi/miniconda3/lib/python3.7/concurrent/futures/thread.py", line 57, in run
+        result = self.fn(*self.args, **self.kwargs)
+      File "/home/hexi/miniconda3/lib/python3.7/site-packages/conda/core/subdir_data.py", line 98, in <lambda>
+        package_ref_or_match_spec))
+      File "/home/hexi/miniconda3/lib/python3.7/site-packages/conda/core/subdir_data.py", line 110, in query
+        self.load()
+      File "/home/hexi/miniconda3/lib/python3.7/site-packages/conda/core/subdir_data.py", line 174, in load
+        _internal_state = self._load()
+      File "/home/hexi/miniconda3/lib/python3.7/site-packages/conda/core/subdir_data.py", line 276, in _load
+        _internal_state = self._process_raw_repodata_str(raw_repodata_str)
+      File "/home/hexi/miniconda3/lib/python3.7/site-packages/conda/core/subdir_data.py", line 349, in _process_raw_repodata_str
+        json_obj = json.loads(raw_repodata_str or '{}')
+      File "/home/hexi/miniconda3/lib/python3.7/json/__init__.py", line 348, in loads
+        return _default_decoder.decode(s)
+      File "/home/hexi/miniconda3/lib/python3.7/json/decoder.py", line 337, in decode
+        obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+      File "/home/hexi/miniconda3/lib/python3.7/json/decoder.py", line 353, in raw_decode
+        obj, end = self.scan_once(s, idx)
+    json.decoder.JSONDecodeError: Expecting property name enclosed in double quotes: line 162529 column 25 (char 4931398)
+
+`$ /home/hexi/miniconda3/bin/conda install faiss-gpu cudatoolkit=10.0 -c pytorch`
+
+  environment variables:
+                 CIO_TEST=<not set>
+                CONDA_EXE=/home/hexi/miniconda3/bin/conda
+         CONDA_PYTHON_EXE=/home/hexi/miniconda3/bin/python
+               CONDA_ROOT=/home/hexi/miniconda3
+              CONDA_SHLVL=0
+          LD_LIBRARY_PATH=/usr/local/cuda-10.0/lib64:
+                     PATH=/home/hexi/miniconda3/bin:/home/hexi/miniconda3/condabin:/usr/local/cu
+                          da-10.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/b
+                          in:/snap/bin
+       REQUESTS_CA_BUNDLE=<not set>
+            SSL_CERT_FILE=<not set>
+             SUDO_COMMAND=/bin/bash
+                 SUDO_GID=1000
+                 SUDO_UID=1000
+                SUDO_USER=hexi
+
+     active environment : None
+            shell level : 0
+       user config file : /home/hexi/.condarc
+ populated config files : /home/hexi/.condarc
+          conda version : 4.8.3
+    conda-build version : not installed
+         python version : 3.7.3.final.0
+       virtual packages : __cuda=10.2
+                          __glibc=2.23
+       base environment : /home/hexi/miniconda3  (writable)
+           channel URLs : https://conda.anaconda.org/pytorch/linux-64
+                          https://conda.anaconda.org/pytorch/noarch
+                          https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/free/linux-64
+                          https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/free/noarch
+                          https://mirrors.ustc.edu.cn/anaconda/pkgs/main/linux-64
+                          https://mirrors.ustc.edu.cn/anaconda/pkgs/main/noarch
+                          https://mirrors.ustc.edu.cn/anaconda/cloud/conda-forge/linux-64
+                          https://mirrors.ustc.edu.cn/anaconda/cloud/conda-forge/noarch
+                          https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/bioconda/linux-64
+                          https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/bioconda/noarch
+                          https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/linux-64
+                          https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/noarch
+                          https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64
+                          https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/noarch
+                          https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/msys2/linux-64
+                          https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/msys2/noarch
+                          https://conda.anaconda.org/genomedk/linux-64
+                          https://conda.anaconda.org/genomedk/noarch
+                          https://conda.anaconda.org/conda-forge/linux-64
+                          https://conda.anaconda.org/conda-forge/noarch
+                          https://conda.anaconda.org/bioconda/linux-64
+                          https://conda.anaconda.org/bioconda/noarch
+                          https://repo.anaconda.com/pkgs/main/linux-64
+                          https://repo.anaconda.com/pkgs/main/noarch
+                          https://repo.anaconda.com/pkgs/r/linux-64
+                          https://repo.anaconda.com/pkgs/r/noarch
+          package cache : /home/hexi/miniconda3/pkgs
+                          /home/hexi/.conda/pkgs
+       envs directories : /home/hexi/miniconda3/envs
+                          /home/hexi/.conda/envs
+               platform : linux-64
+             user-agent : conda/4.8.3 requests/2.23.0 CPython/3.7.3 Linux/4.4.0-21-generic ubuntu/16.04.6 glibc/2.23
+                UID:GID : 0:0
+             netrc file : None
+           offline mode : False
+
+
+An unexpected error has occurred. Conda has prepared the above report.
+```
+
+重新再次执行命令进行安装后成功了：
+
+```
+root@ubuntu:~# conda install faiss-gpu cudatoolkit=10.0 -c pytorch # For CUDA10
+Collecting package metadata (current_repodata.json): done
+Solving environment: \
+Warning: >10 possible package resolutions (only showing differing packages):
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::mkl-service-2.3.0-py37he904b0f_0, https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::mkl_fft-1.2.0-py37h23d657b_0, https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::mkl_random-1.1.1-py37h0573a6f_0, https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::numpy-base-1.19.1-py37hfa32c7d_0
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::mkl_fft-1.2.0-py37h23d657b_0, https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::mkl_random-1.1.1-py37h0573a6f_0, https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::numpy-base-1.19.1-py37hfa32c7d_0, https://mirrors.ustc.edu.cn/anaconda/pkgs/main/linux-64::mkl-service-2.3.0-py37he904b0f_0
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::mkl-service-2.3.0-py37he904b0f_0, https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::mkl_fft-1.2.0-py37h23d657b_0, https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::numpy-base-1.19.1-py37hfa32c7d_0, https://mirrors.ustc.edu.cn/anaconda/pkgs/main/linux-64::mkl_random-1.1.1-py37h0573a6f_0
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::mkl_fft-1.2.0-py37h23d657b_0, https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::numpy-base-1.19.1-py37hfa32c7d_0, https://mirrors.ustc.edu.cn/anaconda/pkgs/main/linux-64::mkl-service-2.3.0-py37he904b0f_0, https://mirrors.ustc.edu.cn/anaconda/pkgs/main/linux-64::mkl_random-1.1.1-py37h0573a6f_0
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::mkl-service-2.3.0-py37he904b0f_0, https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::mkl_fft-1.2.0-py37h23d657b_0, https://mirrors.ustc.edu.cn/anaconda/pkgs/main/linux-64::mkl_random-1.1.1-py37h0573a6f_0, https://mirrors.ustc.edu.cn/anaconda/pkgs/main/linux-64::numpy-base-1.19.1-py37hfa32c7d_0
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::mkl_fft-1.2.0-py37h23d657b_0, https://mirrors.ustc.edu.cn/anaconda/pkgs/main/linux-64::mkl-service-2.3.0-py37he904b0f_0, https://mirrors.ustc.edu.cn/anaconda/pkgs/main/linux-64::mkl_random-1.1.1-py37h0573a6f_0, https://mirrors.ustc.edu.cn/anaconda/pkgs/main/linux-64::numpy-base-1.19.1-py37hfa32c7d_0
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::mkl-service-2.3.0-py37he904b0f_0, https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::mkl_fft-1.2.0-py37h23d657b_0, https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::mkl_random-1.1.1-py37h0573a6f_0, https://mirrors.ustc.edu.cn/anaconda/pkgs/main/linux-64::numpy-base-1.19.1-py37hfa32c7d_0
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::mkl_fft-1.2.0-py37h23d657b_0, https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::mkl_random-1.1.1-py37h0573a6f_0, https://mirrors.ustc.edu.cn/anaconda/pkgs/main/linux-64::mkl-service-2.3.0-py37he904b0f_0, https://mirrors.ustc.edu.cn/anaconda/pkgs/main/linux-64::numpy-base-1.19.1-py37hfa32c7d_0
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::mkl-service-2.3.0-py37he904b0f_0, https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::mkl_random-1.1.1-py37h0573a6f_0, https://mirrors.ustc.edu.cn/anaconda/pkgs/main/linux-64::mkl_fft-1.2.0-py37h23d657b_0, https://mirrors.ustc.edu.cn/anaconda/pkgs/main/linux-64::numpy-base-1.19.1-py37hfa32c7d_0
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::mkl-service-2.3.0-py37he904b0f_0, https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::mkl_random-1.1.1-py37h0573a6f_0, https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/linux-64::numpy-base-1.19.1-py37hfa32c7d_0, https://mirrors.ustc.edu.cn/anaconda/pkgs/main/linux-64::mkl_fft-1.2.0-py37h23d657b_0
+  ... and othedone
+
+
+==> WARNING: A newer version of conda exists. <==
+  current version: 4.8.3
+  latest version: 4.8.5
+
+Please update conda by running
+
+    $ conda update -n base -c defaults conda
+
+
+
+## Package Plan ##
+
+  environment location: /home/hexi/miniconda3
+
+  added / updated specs:
+    - cudatoolkit=10.0
+    - faiss-gpu
+
+
+The following packages will be downloaded:
+
+    package                    |            build
+    ---------------------------|-----------------
+    conda-4.8.5                |           py37_0         2.8 MB  https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main
+    cudatoolkit-10.0.130       |                0       261.2 MB  https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main
+    faiss-gpu-1.6.3            |   py37h1a5d453_0        34.2 MB  pytorch
+    mkl-2020.2                 |              256       138.3 MB  https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main
+    ------------------------------------------------------------
+                                           Total:       436.6 MB
+
+The following NEW packages will be INSTALLED:
+
+  blas               anaconda/pkgs/free/linux-64::blas-1.0-mkl
+  cudatoolkit        anaconda/pkgs/main/linux-64::cudatoolkit-10.0.130-0
+  faiss-gpu          pytorch/linux-64::faiss-gpu-1.6.3-py37h1a5d453_0
+  intel-openmp       anaconda/pkgs/main/linux-64::intel-openmp-2020.2-254
+  mkl                anaconda/pkgs/main/linux-64::mkl-2020.2-256
+  mkl-service        anaconda/pkgs/main/linux-64::mkl-service-2.3.0-py37he904b0f_0
+  mkl_fft            anaconda/pkgs/main/linux-64::mkl_fft-1.2.0-py37h23d657b_0
+  mkl_random         anaconda/pkgs/main/linux-64::mkl_random-1.1.1-py37h0573a6f_0
+  numpy              anaconda/pkgs/main/linux-64::numpy-1.19.1-py37hbc911f0_0
+  numpy-base         anaconda/pkgs/main/linux-64::numpy-base-1.19.1-py37hfa32c7d_0
+
+The following packages will be UPDATED:
+
+  ca-certificates     pkgs/main::ca-certificates-2020.1.1-0 --> anaconda/pkgs/main::ca-certificates-2020.7.22-0
+  certifi              pkgs/main::certifi-2020.4.5.1-py37_0 --> anaconda/pkgs/main::certifi-2020.6.20-py37_0
+  conda                       pkgs/main::conda-4.8.3-py37_0 --> anaconda/pkgs/main::conda-4.8.5-py37_0
+
+The following packages will be SUPERSEDED by a higher-priority channel:
+
+  openssl                                         pkgs/main --> anaconda/pkgs/main
+
+
+Proceed ([y]/n)? y
+
+
+Downloading and Extracting Packages
+mkl-2020.2           | 138.3 MB  | ################################################################################### | 100%
+cudatoolkit-10.0.130 | 261.2 MB  | ################################################################################### | 100%
+conda-4.8.5          | 2.8 MB    | ################################################################################### | 100%
+faiss-gpu-1.6.3      | 34.2 MB   | ################################################################################### | 100%
+Preparing transaction: done
+Verifying transaction: done
+Executing transaction: done
+```
+
+faiss-gpu的使用
+
+参考资料：
+faiss的简单使用 - Gaidy - 博客园  https://www.cnblogs.com/gaidy/p/10917982.html
+
+faiss 使用 - 简书  
+https://www.jianshu.com/p/944be496905f
+
+
+在conda中切换环境,并安装相应的包：
+
+查看:
+conda env list
+
+激活：
+conda activate base
+
+安装包：
+conda install 包名
+
+退出：
+conda deactivate 
+
+
+运行结果：
+
+```
+(base) root@ubuntu:/mnt/sda1/transdat/VecSearch# python VecSearch_faiss.py --gpu=0
+=========大批量向量余弦相似度计算-[faiss版]==========
+随机生成100000个向量，维度：768
+正在创建搜索器...
+GPU使用情况:单个
+创建用时:0.909879秒
+Used Memory: 1543.52734375 MB
+-----------------单条查询测试-----------------
+显示查询结果，并验证余弦相似度...
+索引号: 1058, 距离:114.878265, 余弦相似度:0.771127
+索引号:  541, 距离:115.051285, 余弦相似度:0.780861
+索引号:  370, 距离:115.715897, 余弦相似度:0.777756
+索引号:  209, 距离:115.731323, 余弦相似度:0.775479
+索引号: 1472, 距离:115.832962, 余弦相似度:0.779494
+总用时:3毫秒
+-----------------批量查询测试-----------------
+正在批量测试10000次，每次返回Top 5，请稍候...
+总用时:20104毫秒, 平均用时:2.010491毫秒
+----------------------------------------
+回车开始测试(Q退出)：
+随机生成一个查询向量...
+query:[0.32747996 0.85467975 0.40446144 0.05978433 0.93397492]...
+查询结果:...
+相似度:[[114.878265 115.051285 115.7159   115.73132  115.83296 ]]
+索引号:[[1058  541  370  209 1472]]
+用时:2.941370 毫秒
+```
+
+对比使用faiss-cpu的速度更快，可能的原因是全部放入内存，没有进行交换吧。
+结果如下：
+```
+(base) root@ubuntu:/mnt/sda1/transdat/VecSearch# python VecSearch_faiss.py
+=========大批量向量余弦相似度计算-[faiss版]==========
+随机生成100000个向量，维度：768
+正在创建搜索器...
+GPU使用情况:不使用
+创建用时:0.669978秒
+Used Memory: 1312.421875 MB
+-----------------单条查询测试-----------------
+显示查询结果，并验证余弦相似度...
+索引号: 1058, 距离:114.878265, 余弦相似度:0.771127
+索引号:  541, 距离:115.051285, 余弦相似度:0.780861
+索引号:  370, 距离:115.715881, 余弦相似度:0.777756
+索引号:  209, 距离:115.731339, 余弦相似度:0.775479
+索引号: 1472, 距离:115.832947, 余弦相似度:0.779494
+总用时:4毫秒
+-----------------批量查询测试-----------------
+正在批量测试10000次，每次返回Top 5，请稍候...
+总用时:2610毫秒, 平均用时:0.261025毫秒
+----------------------------------------
+
+```
